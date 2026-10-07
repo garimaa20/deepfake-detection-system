@@ -1,117 +1,336 @@
 import streamlit as st
+import tempfile
 from PIL import Image
-import torch
-from transformers import AutoImageProcessor, AutoModelForImageClassification
+from model import predict
 
 
-st.title("AI Image Detection System")
+# =========================================================
+# PAGE CONFIG
+# =========================================================
 
-st.write(
-    "Upload an image to check whether it is likely real or AI-generated."
+st.set_page_config(
+    page_title="DeepTrace | Deepfake Detection",
+    page_icon="🔍",
+    layout="wide"
 )
 
 
-@st.cache_resource
-def load_model():
+# =========================================================
+# CUSTOM CSS ONLY
+# =========================================================
 
-    model_name = "capcheck/ai-image-detection"
+st.markdown(
+    """
+    <style>
 
-    processor = AutoImageProcessor.from_pretrained(
-        model_name
-    )
+    .stApp {
+        background:
+            radial-gradient(
+                circle at top right,
+                #18243d 0%,
+                #0b1020 40%,
+                #070b14 100%
+            );
+    }
 
-    model = AutoModelForImageClassification.from_pretrained(
-        model_name
-    )
+    #MainMenu {
+        visibility: hidden;
+    }
 
-    return processor, model
+    footer {
+        visibility: hidden;
+    }
 
+    header {
+        visibility: hidden;
+    }
+
+    .block-container {
+        max-width: 1050px;
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+    .brand {
+        font-size: 28px;
+        font-weight: 800;
+        margin-bottom: 30px;
+    }
+
+    .hero {
+        text-align: center;
+        margin-bottom: 45px;
+    }
+
+    .hero h1 {
+        font-size: 46px;
+        margin-bottom: 10px;
+    }
+
+    .hero p {
+        font-size: 17px;
+        color: #aeb8cc;
+    }
+
+    .result-real {
+        padding: 25px;
+        border-radius: 18px;
+        border: 2px solid #22c55e;
+        background: rgba(34, 197, 94, 0.10);
+        text-align: center;
+    }
+
+    .result-fake {
+        padding: 25px;
+        border-radius: 18px;
+        border: 2px solid #ef4444;
+        background: rgba(239, 68, 68, 0.10);
+        text-align: center;
+    }
+
+    .result-title {
+        font-size: 15px;
+        color: #aeb8cc;
+        text-transform: uppercase;
+        letter-spacing: 2px;
+    }
+
+    .result-value {
+        font-size: 38px;
+        font-weight: 800;
+        margin: 8px 0;
+    }
+
+    .confidence {
+        font-size: 19px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# =========================================================
+# BRAND
+# =========================================================
+
+st.markdown(
+    "🔍 **DeepTrace**"
+)
+
+
+# =========================================================
+# HERO
+# =========================================================
+
+st.markdown(
+    """
+    <div class="hero">
+        <h1>Deepfake Detection System</h1>
+        <p>
+            Analyze images using an AI-powered detection model
+            to determine whether an image is likely real or
+            AI-generated / manipulated.
+        </p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
+
+
+# =========================================================
+# UPLOAD
+# =========================================================
+
+st.subheader("📤 Upload an Image")
 
 uploaded_file = st.file_uploader(
-    "Upload an Image",
+    "Choose an image",
     type=["jpg", "jpeg", "png"]
 )
 
+
+# =========================================================
+# IMAGE + DETECTION
+# =========================================================
 
 if uploaded_file is not None:
 
     image = Image.open(uploaded_file).convert("RGB")
 
+    st.subheader("🖼️ Uploaded Image")
+
     st.image(
         image,
-        caption="Uploaded Image",
-        use_container_width=True
+        width="stretch"
     )
 
-    if st.button("🔍 Detect AI Image"):
+    detect_button = st.button(
+        "🔍 Analyze Image",
+        type="primary",
+        width="stretch"
+    )
+
+    if detect_button:
 
         with st.spinner("Analyzing image..."):
 
-            processor, model = load_model()
+            # SAME WORKING PIPELINE
 
-            inputs = processor(
-                images=image,
-                return_tensors="pt"
+            with tempfile.NamedTemporaryFile(
+                delete=False,
+                suffix=".jpg"
+            ) as temp_file:
+
+                image.save(temp_file.name)
+                image_path = temp_file.name
+
+            # SAME MODEL FUNCTION
+
+            result = predict(image_path)
+
+
+        # =================================================
+        # RESULTS
+        # =================================================
+
+        prediction = result["prediction"]
+        confidence = result["confidence"]
+        real_probability = result["real_probability"]
+        fake_probability = result["fake_probability"]
+
+
+        st.divider()
+
+        st.subheader("📊 Detection Result")
+
+
+        # =================================================
+        # REAL
+        # =================================================
+
+        if prediction.upper() == "REAL":
+
+            st.success(
+                f"🟢 REAL — Confidence: {confidence:.2f}%"
             )
-
-            with torch.no_grad():
-
-                outputs = model(**inputs)
-
-            probabilities = torch.nn.functional.softmax(
-                outputs.logits,
-                dim=-1
-            )[0]
-
-            real_probability = (
-                probabilities[0].item() * 100
-            )
-
-            fake_probability = (
-                probabilities[1].item() * 100
-            )
-
-
-        st.subheader("Detection Result")
-
-        st.write(
-            f"Real Probability: **{real_probability:.2f}%**"
-        )
-
-        st.write(
-            f"AI Probability: **{fake_probability:.2f}%**"
-        )
-
-
-        if fake_probability >= 75:
-
-            st.error("🔴 Likely AI Generated")
 
             st.info(
-                "The detector has high confidence that "
-                "this image may be AI-generated."
+                "The detector predicts that this image "
+                "is likely a real photograph."
             )
 
-        elif real_probability >= 75:
 
-            st.success("🟢 Likely Real")
-
-            st.info(
-                "The detector has high confidence that "
-                "this image may be a real photograph."
-            )
+        # =================================================
+        # FAKE
+        # =================================================
 
         else:
 
-            st.warning("🟡 Uncertain")
+            st.error(
+                f"🔴 FAKE — Confidence: {confidence:.2f}%"
+            )
 
-            st.info(
-                "The detector is not confident enough "
-                "to classify this image reliably."
+            st.warning(
+                "The detector predicts that this image "
+                "is likely AI-generated or manipulated."
             )
 
 
+        # =================================================
+        # PROBABILITY
+        # =================================================
+
+        st.subheader("📈 Probability Analysis")
+
+
+        col1, col2 = st.columns(2)
+
+
+        with col1:
+
+            st.metric(
+                "🟢 Real Probability",
+                f"{real_probability:.2f}%"
+            )
+
+            st.progress(
+                int(real_probability)
+            )
+
+
+        with col2:
+
+            st.metric(
+                "🔴 AI / Fake Probability",
+                f"{fake_probability:.2f}%"
+            )
+
+            st.progress(
+                int(fake_probability)
+            )
+
+
+        # =================================================
+        # HOW IT WORKS
+        # =================================================
+
+        st.subheader("🧠 How It Works")
+
+
+        col1, col2, col3 = st.columns(3)
+
+
+        with col1:
+
+            st.markdown("### 01 · Upload")
+
+            st.write(
+                "Upload an image in JPG, JPEG or PNG format."
+            )
+
+
+        with col2:
+
+            st.markdown("### 02 · Analyze")
+
+            st.write(
+                "The image is processed and passed through "
+                "the pretrained deepfake detection model."
+            )
+
+
+        with col3:
+
+            st.markdown("### 03 · Result")
+
+            st.write(
+                "The system displays the predicted class "
+                "along with confidence and probability."
+            )
+
+
+        # =================================================
+        # DISCLAIMER
+        # =================================================
+
+        st.divider()
+
         st.caption(
-            "Note: AI image detection is probabilistic "
-            "and can produce false results."
+            "⚠️ Detection is probabilistic and may produce "
+            "false results. The result should not be treated "
+            "as absolute proof of authenticity."
         )
+
+
+# =========================================================
+# FOOTER
+# =========================================================
+
+st.divider()
+
+st.caption(
+    "DeepTrace · Deepfake Detection System · "
+    "AI-assisted image authenticity analysis"
+)
